@@ -191,6 +191,11 @@ Options:
   -V, --version          Print version
 ```
 
+```bash
+# Run the pipeline
+cargo run -- --config examples/01/pipeline.yaml
+```
+
 ---
 
 ## Project Structure

@@ -4,7 +4,6 @@ set -e
 echo "[$TASK_NAME] Iniciando..."
 
 mkdir -p "$(dirname "$OUT_RAW_DATA")"
-env
 
 echo "id,item,cantidad" > "$OUT_RAW_DATA"
 echo "1,Servidor,5"     >> "$OUT_RAW_DATA"
