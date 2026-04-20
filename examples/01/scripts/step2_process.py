@@ -1,6 +1,6 @@
 import os
 
-task_name  = os.environ.get("TASK_NAME")
+task_name  = os.environ.get("TASK_NAME_ID")
 input_csv  = os.environ.get("IN_RAW_DATA")
 output_txt = os.environ.get("OUT_REPORT")
 

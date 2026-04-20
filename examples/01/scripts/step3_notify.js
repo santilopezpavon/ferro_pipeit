@@ -1,16 +1,16 @@
 const fs = require('fs');
 const os = require('os');
 
-const taskName  = process.env.TASK_NAME;
+const taskName = process.env.TASK_NAME_ID;
 const reportPath = process.env.IN_REPORT;
 
 console.log(`[${taskName}] Starting...`);
 
 // Parse key=value report
 const report = Object.fromEntries(
-    fs.readFileSync(reportPath, 'utf8')
-        .trim().split('\n')
-        .map(l => l.split('='))
+  fs.readFileSync(reportPath, 'utf8')
+    .trim().split('\n')
+    .map(l => l.split('='))
 );
 
 console.log(`

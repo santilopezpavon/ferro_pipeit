@@ -26,6 +26,7 @@ impl Runner {
     pub async fn run(&self) -> Result<()> {
         let mut completed_tasks = HashSet::<String>::new();
         let mut running_tasks = HashSet::<String>::new();
+
         let (tx, mut rx) = mpsc::channel(100);
 
         let total_tasks = self.dag.total_tasks();
@@ -35,93 +36,140 @@ impl Runner {
             let ready_tasks = self.dag.get_ready_tasks(&completed_tasks);
 
             for task_id in ready_tasks {
-                if !running_tasks.contains(&task_id) {
-                    let task_def = self.config.tasks.get(&task_id).unwrap().clone();
+                if running_tasks.contains(&task_id) {
+                    continue;
+                }
 
-                    // Validate all declared inputs exist on disk
-                    let mut missing = false;
-                    for (name, path) in &task_def.inputs {
-                        if !std::path::Path::new(path).exists() {
-                            error!(
-                                "Task '{}': input '{}' not found at '{}'",
-                                task_id, name, path
-                            );
-                            missing = true;
+                let task_def = self.config.tasks.get(&task_id).unwrap().clone();
+
+                // validar inputs
+                let mut missing = false;
+                for (name, path) in &task_def.inputs {
+                    if !std::path::Path::new(path).exists() {
+                        error!(
+                            "Task '{}': input '{}' not found at '{}'",
+                            task_id, name, path
+                        );
+                        missing = true;
+                    }
+                }
+
+                if missing {
+                    let _ = tx.try_send(TaskResult::Failure(task_id.clone(), 0));
+                    continue;
+                }
+
+                running_tasks.insert(task_id.clone());
+                let tx_for_spawn = tx.clone();
+                let task_id_clone = task_id.clone();
+
+                info!("Launching task: {}", task_id);
+
+                tokio::spawn(async move {
+                    let mut retries = 0u32;
+
+                    loop {
+                        // 🔥 parse simple: bin + args
+                        let mut parts = task_def.cmd.split_whitespace();
+                        let program = match parts.next() {
+                            Some(p) => p,
+                            None => {
+                                let _ = tx_for_spawn.send(
+                                    TaskResult::Failure(task_id_clone.clone(), retries)
+                                ).await;
+                                return;
+                            }
+                        };
+
+                        let args: Vec<&str> = parts.collect();
+
+                        let mut cmd = Command::new(program);
+                        cmd.args(args);
+                        cmd.env("TASK_NAME_ID", &task_id_clone);
+
+                        for (name, path) in &task_def.inputs {
+                            cmd.env(format!("IN_{}", name.to_uppercase()), path);
                         }
-                    }
-                    if missing {
-                        let _ = tx.try_send(TaskResult::Failure(task_id.clone(), 0));
-                        continue;
-                    }
 
-                    running_tasks.insert(task_id.clone());
-                    let tx_for_spawn = tx.clone();
-                    let task_id_clone = task_id.clone();
+                        for (name, path) in &task_def.outputs {
+                            cmd.env(format!("OUT_{}", name.to_uppercase()), path);
+                        }
 
-                    info!("Launching task: {}", task_id);
-                    tokio::spawn(async move {
-                        let mut retries = 0u32;
-                        loop {
-                            let mut cmd = Command::new("sh");
-                            cmd.arg("-c")
-                                .arg(&task_def.cmd)
-                                .env("TASK_NAME", &task_id_clone);
-
-                            for (name, path) in &task_def.inputs {
-                                cmd.env(format!("IN_{}", name.to_uppercase()), path);
-                            }
-                            for (name, path) in &task_def.outputs {
-                                cmd.env(format!("OUT_{}", name.to_uppercase()), path);
-                            }
-
-                            match cmd.spawn() {
-                                Ok(mut child_proc) => {
-                                    let status = if let Some(t) = task_def.timeout_secs {
-                                        match tokio::time::timeout(
-                                            Duration::from_secs(t),
-                                            child_proc.wait(),
-                                        ).await {
-                                            Ok(result) => result,
-                                            Err(_) => {
-                                                let _ = child_proc.kill().await;
-                                                warn!("Task '{}' timed out after {}s", task_id_clone, t);
-                                                Err(std::io::Error::new(
-                                                    std::io::ErrorKind::TimedOut,
-                                                    format!("Task timed out after {}s", t),
-                                                ))
-                                            }
+                        match cmd.spawn() {
+                            Ok(mut child) => {
+                                let status = if let Some(t) = task_def.timeout_secs {
+                                    match tokio::time::timeout(
+                                        Duration::from_secs(t),
+                                        child.wait(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(res) => res,
+                                        Err(_) => {
+                                            let _ = child.kill().await;
+                                            warn!(
+                                                "Task '{}' timed out after {}s",
+                                                task_id_clone, t
+                                            );
+                                            Err(std::io::Error::new(
+                                                std::io::ErrorKind::TimedOut,
+                                                "timeout",
+                                            ))
                                         }
-                                    } else {
-                                        child_proc.wait().await
-                                    };
+                                    }
+                                } else {
+                                    child.wait().await
+                                };
 
-                                    match status {
-                                        Ok(s) if s.success() => {
-                                            let _ = tx_for_spawn.send(TaskResult::Success(task_id_clone)).await;
-                                            return;
-                                        }
-                                        Ok(s) => warn!("Task '{}' failed with exit status: {}", task_id_clone, s),
-                                        Err(e) => warn!("Task '{}' execution error: {}", task_id_clone, e),
+                                match status {
+                                    Ok(s) if s.success() => {
+                                        let _ = tx_for_spawn
+                                            .send(TaskResult::Success(task_id_clone.clone()))
+                                            .await;
+                                        return;
+                                    }
+                                    Ok(s) => {
+                                        warn!(
+                                            "Task '{}' failed with status {}",
+                                            task_id_clone, s
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Task '{}' execution error: {}",
+                                            task_id_clone, e
+                                        );
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Failed to spawn task '{}': {}. Will not retry.", task_id_clone, e);
-                                    let _ = tx_for_spawn.send(TaskResult::Failure(task_id_clone, 0)).await;
-                                    return;
-                                }
                             }
-
-                            retries += 1;
-                            if retries <= task_def.retries {
-                                warn!("Retrying task '{}' ({}/{})", task_id_clone, retries, task_def.retries);
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                            } else {
-                                let _ = tx_for_spawn.send(TaskResult::Failure(task_id_clone, retries - 1)).await;
+                            Err(e) => {
+                                error!(
+                                    "Failed to spawn task '{}': {}",
+                                    task_id_clone, e
+                                );
+                                let _ = tx_for_spawn
+                                    .send(TaskResult::Failure(task_id_clone.clone(), retries))
+                                    .await;
                                 return;
                             }
                         }
-                    });
-                }
+
+                        retries += 1;
+
+                        if retries <= task_def.retries {
+                            warn!(
+                                "Retrying task '{}' ({}/{})",
+                                task_id_clone, retries, task_def.retries
+                            );
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        } else {
+                            let _ = tx_for_spawn
+                                .send(TaskResult::Failure(task_id_clone.clone(), retries - 1))
+                                .await;
+                            return;
+                        }
+                    }
+                });
             }
 
             if finished_count >= total_tasks {
@@ -137,8 +185,14 @@ impl Runner {
                         finished_count += 1;
                     }
                     TaskResult::Failure(id, retries) => {
-                        error!("Task '{}' failed after {} retries. Aborting pipeline.", id, retries);
-                        return Err(anyhow!("Pipeline execution failed due to task '{}'", id));
+                        error!(
+                            "Task '{}' failed after {} retries. Aborting pipeline.",
+                            id, retries
+                        );
+                        return Err(anyhow!(
+                            "Pipeline execution failed due to task '{}'",
+                            id
+                        ));
                     }
                 }
             } else {
@@ -146,7 +200,11 @@ impl Runner {
             }
         }
 
-        info!("Pipeline completed successfully: {}/{} tasks finished", finished_count, total_tasks);
+        info!(
+            "Pipeline completed successfully: {}/{} tasks finished",
+            finished_count, total_tasks
+        );
+
         Ok(())
     }
 }
