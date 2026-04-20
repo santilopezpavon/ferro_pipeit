@@ -1,0 +1,25 @@
+tasks:
+  init:
+    cmd: "bash scripts/step1_init.sh"
+    retries: 1
+    timeout_secs: 30
+    outputs:
+      raw_data: "data/raw.csv"
+
+  process:
+    cmd: "python3 scripts/step2_process.py"
+    deps: ["init"]
+    retries: 1
+    timeout_secs: 60
+    inputs:
+      raw_data: "data/raw.csv"
+    outputs:
+      report: "data/report.txt"
+
+  notify:
+    cmd: "node scripts/step3_notify.js"
+    deps: ["process"]
+    retries: 0
+    timeout_secs: 30
+    inputs:
+      report: "data/report.txt"
