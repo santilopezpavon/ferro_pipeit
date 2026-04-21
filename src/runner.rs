@@ -85,14 +85,14 @@ impl Runner {
 
                         let mut cmd = Command::new(program);
                         cmd.args(args);
-                        cmd.env("TASK_NAME_ID", &task_id_clone);
+                        cmd.env("PIPEIT_TASK_NAME_ID", &task_id_clone);
 
                         for (name, path) in &task_def.inputs {
-                            cmd.env(format!("IN_{}", name.to_uppercase()), path);
+                            cmd.env(format!("PIPEIT_IN_{}", name.to_uppercase()), path);
                         }
 
                         for (name, path) in &task_def.outputs {
-                            cmd.env(format!("OUT_{}", name.to_uppercase()), path);
+                            cmd.env(format!("PIPEIT_OUT_{}", name.to_uppercase()), path);
                         }
 
                         match cmd.spawn() {

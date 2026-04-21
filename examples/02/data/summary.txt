@@ -1,0 +1,6 @@
+---- RAW ----
+line1
+line2
+
+---- REPORT ----
+Total lines: 2

@@ -1,0 +1,30 @@
+tasks:
+  init:
+    cmd: "bash examples/02/scripts/init.sh"
+    outputs:
+      raw_data: "examples/02/data/raw.txt"
+
+  process:
+    cmd: "python3 examples/02/scripts/process.py"
+    deps: ["init"]
+    inputs:
+      raw_data: "examples/02/data/raw.txt"
+    outputs:
+      processed: "examples/02/data/processed.txt"
+
+  analyze:
+    cmd: "node examples/02/scripts/analyze.js"
+    deps: ["process"]
+    inputs:
+      processed: "examples/02/data/processed.txt"
+    outputs:
+      report: "examples/02/data/report.txt"
+
+  summary:
+    cmd: "bash examples/02/scripts/summary.sh"
+    deps: ["init", "analyze"]
+    inputs:
+      raw_data: "examples/02/data/raw.txt"
+      report: "examples/02/data/report.txt"
+    outputs:
+      summary: "examples/02/data/summary.txt"

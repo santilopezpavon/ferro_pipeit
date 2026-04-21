@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
 
-echo "[$TASK_NAME_ID] Iniciando..."
+echo "[$PIPEIT_TASK_NAME_ID] Iniciando..."
 
-mkdir -p "$(dirname "$OUT_RAW_DATA")"
+mkdir -p "$(dirname "$PIPEIT_OUT_RAW_DATA")"
 
-echo "id,item,cantidad" > "$OUT_RAW_DATA"
-echo "1,Servidor,5"     >> "$OUT_RAW_DATA"
-echo "2,Switch,12"      >> "$OUT_RAW_DATA"
-echo "3,Router,3"       >> "$OUT_RAW_DATA"
+echo "id,item,cantidad" > "$PIPEIT_OUT_RAW_DATA"
+echo "1,Servidor,5"     >> "$PIPEIT_OUT_RAW_DATA"
+echo "2,Switch,12"      >> "$PIPEIT_OUT_RAW_DATA"
+echo "3,Router,3"       >> "$PIPEIT_OUT_RAW_DATA"
 
-echo "[$TASK_NAME_ID] Archivo creado en: $OUT_RAW_DATA"
-echo "[$TASK_NAME_ID] Done."
+echo "[$PIPEIT_TASK_NAME_ID] Archivo creado en: $PIPEIT_OUT_RAW_DATA"
+echo "[$PIPEIT_TASK_NAME_ID] Done."

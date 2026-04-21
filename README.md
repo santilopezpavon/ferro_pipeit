@@ -172,12 +172,16 @@ The compiled binary is placed at `target/release/ferro_pipeit`.
 
 ```bash
 cargo run -- --config pipeline.yaml
+cargo run -- -c examples/01/pipeline.yaml
+cargo run -- -c examples/02/pipeline.yaml
 ```
 
 Or with the release binary:
 
 ```bash
 ./target/release/ferro_pipeit --config pipeline.yaml
+./target/release/ferro_pipeit -c examples/01/pipeline.yaml
+./target/release/ferro_pipeit -c examples/02/pipeline.yaml
 ```
 
 ### CLI Options

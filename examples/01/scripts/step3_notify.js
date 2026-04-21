@@ -1,8 +1,8 @@
 const fs = require('fs');
 const os = require('os');
 
-const taskName = process.env.TASK_NAME_ID;
-const reportPath = process.env.IN_REPORT;
+const taskName = process.env.PIPEIT_TASK_NAME_ID;
+const reportPath = process.env.PIPEIT_IN_REPORT;
 
 console.log(`[${taskName}] Starting...`);
 
