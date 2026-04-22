@@ -1,5 +1,6 @@
 mod models;
 mod dag;
+mod engine;
 mod runner;
 
 use clap::Parser;
@@ -8,6 +9,7 @@ use tracing::{info, error};
 use crate::models::PipelineConfig;
 use crate::dag::Dag;
 use crate::runner::Runner;
+use crate::engine::{OsFileEngine, ProcessTaskRunner};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -33,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let dag = Dag::new(&config)?;
     info!("DAG validated. Found {} tasks.", dag.total_tasks());
 
-    let runner = Runner::new(config, dag);
+    let runner = Runner::new(config, dag, OsFileEngine, ProcessTaskRunner);
 
     info!("Starting pipeline execution...");
     let result = runner.run().await;
