@@ -202,6 +202,18 @@ cargo run -- --config examples/01/pipeline.yaml
 
 ---
 
+## Testing & Reproducibility Architecture
+
+Ferro Pipeit is designed with a 100% testable architecture via Dependency Injection. It isolates real system interactions behind abstract traits. 
+
+The primary traits, located in `src/engine.rs`, are:
+- **`FileEngine`**: Abstracts file system access. Its primary method `exists(path)` enables checking if inputs are valid. The production system utilizes `OsFileEngine` while the test suite simply injects an in-memory `MockFileEngine`.
+- **`TaskRunner`**: Abstracts the execution of shell commands. The production system utilizes `ProcessTaskRunner` (spawning Tokio subprocesses), while tests use a `MockTaskRunner` to securely simulate successes, failures, and timeouts without invoking side effects on the host OS.
+
+By composing the `Runner` over `<F: FileEngine, T: TaskRunner>`, the entire pipeline orchestration logic—DAG traversal, strict input validations, retries, and halts on failures—can be tested deterministically and completely decoupled from varying OS environments.
+
+---
+
 ## Project Structure
 
 ```
@@ -210,7 +222,8 @@ ferro_pipeit/
     main.rs       Entry point. Parses CLI args, loads config, runs the pipeline.
     models.rs     Data structures: TaskDefinition, PipelineConfig.
     dag.rs        DAG construction and dependency resolution using petgraph.
-    runner.rs     Task execution, lineage validation, retry and timeout logic.
+    engine.rs     System abstraction traits (`FileEngine`, `TaskRunner`) and mock capabilities.
+    runner.rs     Task execution, lineage validation, retry and timeout logic using Dependency Injection.
   pipeline.yaml   Pipeline definition file.
   scripts/        Example scripts consumed by the pipeline.
   Cargo.toml      Rust dependencies.
@@ -228,3 +241,4 @@ ferro_pipeit/
 | clap               | CLI argument parsing                   |
 | anyhow             | Error propagation                      |
 | tracing            | Structured logging                     |
+| async-trait        | Asynchronous trait abstraction         |

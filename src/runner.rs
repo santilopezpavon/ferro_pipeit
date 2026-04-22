@@ -1,8 +1,9 @@
 use crate::dag::Dag;
 use crate::models::PipelineConfig;
+use crate::engine::{FileEngine, TaskRunner};
 use anyhow::{anyhow, Result};
 use std::collections::HashSet;
-use tokio::process::Command;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error};
 use std::time::Duration;
@@ -13,14 +14,21 @@ enum TaskResult {
     Failure(String, u32),
 }
 
-pub struct Runner {
+pub struct Runner<F: FileEngine + 'static, T: TaskRunner + 'static> {
     config: PipelineConfig,
     dag: Dag,
+    file_engine: Arc<F>,
+    task_runner: Arc<T>,
 }
 
-impl Runner {
-    pub fn new(config: PipelineConfig, dag: Dag) -> Self {
-        Self { config, dag }
+impl<F: FileEngine, T: TaskRunner> Runner<F, T> {
+    pub fn new(config: PipelineConfig, dag: Dag, file_engine: F, task_runner: T) -> Self {
+        Self { 
+            config, 
+            dag,
+            file_engine: Arc::new(file_engine),
+            task_runner: Arc::new(task_runner),
+        }
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -45,7 +53,7 @@ impl Runner {
                 // validar inputs
                 let mut missing = false;
                 for (name, path) in &task_def.inputs {
-                    if !std::path::Path::new(path).exists() {
+                    if !self.file_engine.exists(path).await {
                         error!(
                             "Task '{}': input '{}' not found at '{}'",
                             task_id, name, path
@@ -62,6 +70,7 @@ impl Runner {
                 running_tasks.insert(task_id.clone());
                 let tx_for_spawn = tx.clone();
                 let task_id_clone = task_id.clone();
+                let task_runner = Arc::clone(&self.task_runner);
 
                 info!("Launching task: {}", task_id);
 
@@ -69,88 +78,15 @@ impl Runner {
                     let mut retries = 0u32;
 
                     loop {
-                        // 🔥 parse simple: bin + args
-                        let mut parts = task_def.cmd.split_whitespace();
-                        let program = match parts.next() {
-                            Some(p) => p,
-                            None => {
-                                let _ = tx_for_spawn.send(
-                                    TaskResult::Failure(task_id_clone.clone(), retries)
-                                ).await;
+                        let exec_result = task_runner.execute(&task_id_clone, &task_def).await;
+
+                        match exec_result {
+                            Ok(_) => {
+                                let _ = tx_for_spawn.send(TaskResult::Success(task_id_clone.clone())).await;
                                 return;
-                            }
-                        };
-
-                        let args: Vec<&str> = parts.collect();
-
-                        let mut cmd = Command::new(program);
-                        cmd.args(args);
-                        cmd.env("PIPEIT_TASK_NAME_ID", &task_id_clone);
-
-                        for (name, path) in &task_def.inputs {
-                            cmd.env(format!("PIPEIT_IN_{}", name.to_uppercase()), path);
-                        }
-
-                        for (name, path) in &task_def.outputs {
-                            cmd.env(format!("PIPEIT_OUT_{}", name.to_uppercase()), path);
-                        }
-
-                        match cmd.spawn() {
-                            Ok(mut child) => {
-                                let status = if let Some(t) = task_def.timeout_secs {
-                                    match tokio::time::timeout(
-                                        Duration::from_secs(t),
-                                        child.wait(),
-                                    )
-                                    .await
-                                    {
-                                        Ok(res) => res,
-                                        Err(_) => {
-                                            let _ = child.kill().await;
-                                            warn!(
-                                                "Task '{}' timed out after {}s",
-                                                task_id_clone, t
-                                            );
-                                            Err(std::io::Error::new(
-                                                std::io::ErrorKind::TimedOut,
-                                                "timeout",
-                                            ))
-                                        }
-                                    }
-                                } else {
-                                    child.wait().await
-                                };
-
-                                match status {
-                                    Ok(s) if s.success() => {
-                                        let _ = tx_for_spawn
-                                            .send(TaskResult::Success(task_id_clone.clone()))
-                                            .await;
-                                        return;
-                                    }
-                                    Ok(s) => {
-                                        warn!(
-                                            "Task '{}' failed with status {}",
-                                            task_id_clone, s
-                                        );
-                                    }
-                                    Err(e) => {
-                                        warn!(
-                                            "Task '{}' execution error: {}",
-                                            task_id_clone, e
-                                        );
-                                    }
-                                }
                             }
                             Err(e) => {
-                                error!(
-                                    "Failed to spawn task '{}': {}",
-                                    task_id_clone, e
-                                );
-                                let _ = tx_for_spawn
-                                    .send(TaskResult::Failure(task_id_clone.clone(), retries))
-                                    .await;
-                                return;
+                                warn!("Task execution failed: {}", e);
                             }
                         }
 
@@ -206,5 +142,126 @@ impl Runner {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{PipelineConfig, TaskDefinition};
+    use crate::engine::{FileEngine, TaskRunner};
+    use crate::dag::Dag;
+    use async_trait::async_trait;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Mutex;
+    use anyhow::Result;
+
+    #[derive(Default)]
+    struct MockFileEngine {
+        existing_files: HashSet<String>,
+    }
+
+    #[async_trait]
+    impl FileEngine for MockFileEngine {
+        async fn exists(&self, path: &str) -> bool {
+            self.existing_files.contains(path)
+        }
+    }
+
+    struct MockTaskRunner {
+        failing_tasks: Mutex<HashMap<String, u32>>, // task_id -> remaining failures
+    }
+
+    impl MockTaskRunner {
+        fn new(failing_tasks: HashMap<String, u32>) -> Self {
+            Self {
+                failing_tasks: Mutex::new(failing_tasks),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TaskRunner for MockTaskRunner {
+        async fn execute(&self, task_id: &str, _task_def: &TaskDefinition) -> Result<()> {
+            let mut fails = self.failing_tasks.lock().unwrap();
+            if let Some(remaining) = fails.get_mut(task_id) {
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    return Err(anyhow::anyhow!("Mock error for task {}", task_id));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn create_test_config() -> PipelineConfig {
+        let mut tasks = HashMap::new();
+        tasks.insert("A".to_string(), TaskDefinition {
+            cmd: "echo A".to_string(),
+            deps: vec![],
+            retries: 2,
+            timeout_secs: Some(1),
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+        });
+        tasks.insert("B".to_string(), TaskDefinition {
+            cmd: "echo B".to_string(),
+            deps: vec!["A".to_string()],
+            retries: 1,
+            timeout_secs: Some(1),
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+        });
+        PipelineConfig { tasks }
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_deterministic_execution() {
+        let config = create_test_config();
+        let dag = Dag::new(&config).unwrap();
+        let file_engine = MockFileEngine::default();
+        let task_runner = MockTaskRunner::new(HashMap::new());
+
+        let runner = Runner::new(config, dag, file_engine, task_runner);
+        let result = runner.run().await;
+        
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_halts_on_failure() {
+        let config = create_test_config();
+        let dag = Dag::new(&config).unwrap();
+        let file_engine = MockFileEngine::default();
+        
+        // Task A will fail 3 times. Retries configured is 2, so it will ultimately fail.
+        let mut fails = HashMap::new();
+        fails.insert("A".to_string(), 3);
+        let task_runner = MockTaskRunner::new(fails);
+
+        let runner = Runner::new(config, dag, file_engine, task_runner);
+        let result = runner.run().await;
+        
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Pipeline execution failed due to task 'A'");
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_missing_inputs() {
+        let mut config = create_test_config();
+        let mut inputs = HashMap::new();
+        inputs.insert("file_a".to_string(), "/missing/file".to_string());
+        config.tasks.get_mut("A").unwrap().inputs = inputs;
+
+        let dag = Dag::new(&config).unwrap();
+        // File engine is empty, so /missing/file will not exist
+        let file_engine = MockFileEngine::default();
+        let task_runner = MockTaskRunner::new(HashMap::new());
+
+        let runner = Runner::new(config, dag, file_engine, task_runner);
+        let result = runner.run().await;
+        
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Pipeline execution failed due to task 'A'");
     }
 }
