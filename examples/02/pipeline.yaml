@@ -1,3 +1,4 @@
+name: data-processing-v2
 tasks:
   init:
     cmd: "bash examples/02/scripts/init.sh"

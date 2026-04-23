@@ -2,6 +2,7 @@ mod models;
 mod dag;
 mod engine;
 mod runner;
+mod cache;
 
 use clap::Parser;
 use tracing::{info, error};
