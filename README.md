@@ -193,14 +193,18 @@ Or with the release binary:
 Usage: ferro_pipeit [OPTIONS]
 
 Options:
-  -c, --config <CONFIG>  Path to the pipeline YAML file [default: pipeline.yaml]
-  -h, --help             Print help
-  -V, --version          Print version
+  -c, --config <CONFIG>      Path to the pipeline YAML file [default: pipeline.yaml]
+  -l, --log-file <LOG_FILE>  Optional file to save logs
+  -h, --help                 Print help
+  -V, --version              Print version
 ```
 
 ```bash
 # Run the pipeline
 cargo run -- --config examples/01/pipeline.yaml
+
+# Run the pipeline and save logs to a file
+cargo run -- --config examples/01/pipeline.yaml --log-file debug.log
 ```
 
 ---
