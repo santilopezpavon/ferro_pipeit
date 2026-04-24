@@ -68,6 +68,7 @@ If a task exits with a non-zero status, it is retried up to `retries` times with
 ## Pipeline YAML Format
 
 ```yaml
+name: <pipeline-name> # A unique name for this pipeline
 tasks:
   <task-name>:
     cmd: "<shell command to run>"
@@ -174,6 +175,7 @@ The compiled binary is placed at `target/release/ferro_pipeit`.
 cargo run -- --config pipeline.yaml
 cargo run -- -c examples/01/pipeline.yaml
 cargo run -- -c examples/02/pipeline.yaml
+cargo run -- -c examples/03/pipeline.yaml
 ```
 
 Or with the release binary:
@@ -182,6 +184,7 @@ Or with the release binary:
 ./target/release/ferro_pipeit --config pipeline.yaml
 ./target/release/ferro_pipeit -c examples/01/pipeline.yaml
 ./target/release/ferro_pipeit -c examples/02/pipeline.yaml
+./target/release/ferro_pipeit -c examples/03/pipeline.yaml
 ```
 
 ### CLI Options

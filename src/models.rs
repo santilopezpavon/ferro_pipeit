@@ -17,5 +17,6 @@ pub struct TaskDefinition {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PipelineConfig {
+    pub name: String, // Identificador único del proyecto/pipeline
     pub tasks: HashMap<String, TaskDefinition>,
 }
