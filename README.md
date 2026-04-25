@@ -2,6 +2,7 @@
 
 A lightweight, data-lineage-aware pipeline orchestrator written in Rust. It executes scripts defined in a YAML file, respecting dependencies between tasks and validating that every declared input file exists on disk before a task is allowed to run.
 
+![ferro_pipeit diagram](docs/ferro_pipeit.jpg)
 ---
 
 ## Overview
